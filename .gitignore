@@ -1,0 +1,17 @@
+.env
+.pip-packages/
+images/
+.ipynb_checkpoints/
+results/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Generic
+*~
+

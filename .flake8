@@ -1,0 +1,6 @@
+[flake8]
+max-line-length = 160
+# E741: Ambiguous variable names (e.g. l)
+extend-ignore = E741
+exclude = \
+        witan/witan_experiments/rule_generators/snuba/reef
