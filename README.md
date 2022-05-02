@@ -37,10 +37,11 @@ into Git bash, then you should be able to run this project on Windows.
 | Notebook | Description |
 | -------- | ----------- |
 | [1_Datasets](http://localhost:9999/notebooks/1_Datasets.ipynb) | Summary of datasets. NOTE: Some datasets must be manually downloaded by the user. When such a dataset is referenced during execution, an exception will be raised informing the user where to download the dataset from, and where to place the results. |
-| [2_BinaryClassExperiments.ipynb](http://localhost:9999/notebooks/2_BinaryClassExperiments.ipynb.ipynb) | Experiments with binary-class datasets |
-| [3_MultiClassExperiments.ipynb](http://localhost:9999/notebooks/3_MultiClassExperiments.ipynb) | Experiments with multi-class datasets |
-| [4_WitanLFs](http://localhost:9999/notebooks/4_WitanLFs.ipynb) | Examples of labelling functions generated with Witan |
-| [5_AblationExperiments](http://localhost:9999/notebooks/5_AblationExperiments.ipynb) | Experiments with variants of the Witan algorithm |
+| [2_RuntimeExperiments.ipynb](http://localhost:9999/notebooks/2_RuntimeExperiments.ipynb) | Experiments comparing method runtimes |
+| [3_BinaryClassExperiments.ipynb](http://localhost:9999/notebooks/3_BinaryClassExperiments.ipynb) | Experiments with binary-class datasets |
+| [4_MultiClassExperiments.ipynb](http://localhost:9999/notebooks/4_MultiClassExperiments.ipynb) | Experiments with multi-class datasets |
+| [5_WitanLFs](http://localhost:9999/notebooks/5_WitanLFs.ipynb) | Examples of labelling functions generated with Witan |
+| [6_AblationExperiments](http://localhost:9999/notebooks/6_AblationExperiments.ipynb) | Experiments with variants of the Witan algorithm |
 
 ### Linting
 

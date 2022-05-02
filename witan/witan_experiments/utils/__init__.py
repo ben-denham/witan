@@ -2,6 +2,7 @@ from datetime import datetime
 from inspect import signature
 import random
 import numpy as np
+import pandas as pd
 import torch
 from typing import Dict, Sequence, Any, cast
 
@@ -56,6 +57,19 @@ def inverse_dict(dictionary: Dict[Any, Any]) -> Dict[Any, Any]:
 def drop_keys(dictionary: Dict[Any, Any], keys: Sequence[Any]) -> Dict[Any, Any]:
     """Return a dict that drops any of the given keys from the given dictionary."""
     return {k: v for k, v in dictionary.items() if k not in set(keys)}
+
+
+def list_series_to_one_hot_df(list_series: pd.Series) -> pd.DataFrame:
+    """Convert a Series of lists (allowing nans) into a DataFrame of
+    one-hot binary columns representing the presence of each possible
+    list item."""
+    list_series = list_series.copy()
+    list_series[list_series.isna()] = cast(pd.Series, list_series[list_series.isna()]).apply(lambda x: [])
+    element_set = set([element for elements in list_series for element in elements])
+    return pd.DataFrame({
+        element: list_series.apply(lambda elements: (element in elements) if elements else False)
+        for element in sorted(element_set)
+    })
 
 
 class KeyHashable:

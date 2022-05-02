@@ -1,10 +1,10 @@
 import numpy as np
 import pandas as pd
 from time import time
-from sklearn.base import ClassifierMixin
 from typing import List, Dict, Set, Any
 
 from .base import Rule, RulesetGenerator
+from ..models import Classifier
 from ..utils import log
 
 
@@ -19,7 +19,7 @@ class ActiveLearningRG(RulesetGenerator):
                 uncertainty sampling with.
     """
 
-    def __init__(self, *, clf: ClassifierMixin, init_count: int = 0):
+    def __init__(self, *, clf: Classifier, init_count: int = 0):
         self.clf = clf
         self.init_count = init_count
 

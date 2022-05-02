@@ -1,11 +1,15 @@
 import os
+from pathlib import Path
 import re
+import joblib
 import numpy as np
 import pandas as pd
 import requests
 import json
 from copy import deepcopy
 from typing import cast, Set, Optional, Mapping, Callable
+
+from .utils import list_series_to_one_hot_df
 
 # Use a different seed for each stage of an experiment to prevent
 # overlaps and unintended correlation. Different orders of magnitude
@@ -139,7 +143,179 @@ def imdb_dataset() -> Dataset:
     return iws_dataset_loader(
         csv_name='IMDB',
         class_labels={1: 'positive', -1: 'negative'},
-        description='IMDB Reviews',
+        description='IMDB Reviews: Sentiment',
+    )
+
+
+def extended_imdb_df() -> pd.DataFrame:
+    EXTENDED_IMDB_CACHE_PATH = cache_path('extended_imdb_dataframe.joblib')
+    if os.path.isfile(EXTENDED_IMDB_CACHE_PATH):
+        return joblib.load(EXTENDED_IMDB_CACHE_PATH)
+
+    dataset_df = imdb_dataset().df
+
+    # Download the original/full IMDB reviews dataset
+    full_dataset_dir = cache_path('imdb_full')
+    cache_and_unzip(cache_path('aclImdb_v1.tar.gz'),
+                    full_dataset_dir,
+                    'https://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz',
+                    targz=True)
+
+    def get_title_ids(df: pd.DataFrame, *, fold: int, target_class: str) -> pd.DataFrame:
+        if fold == 0:
+            fold_dirname = 'train'
+        elif fold == 1:
+            fold_dirname = 'test'
+        else:
+            raise ValueError(f'Invalid fold: {fold}')
+
+        if target_class == 'positive':
+            class_label = 'pos'
+        elif target_class == 'negative':
+            class_label = 'neg'
+        else:
+            raise ValueError(f'Invalid target_class: {target_class}')
+
+        # Find files of review text
+        fold_dir = os.path.join(full_dataset_dir, 'aclImdb', fold_dirname)
+        review_files = Path(os.path.join(fold_dir, class_label)).glob('*.txt')
+
+        punc_trans = str.maketrans('', '', '!"\'(),.:;?[]')
+        br_regex = re.compile(r'(<br />)+')
+        reviews = []
+        for review_file in review_files:
+            with review_file.open() as f:
+                raw_review_text = f.read()
+
+            # Transform the review text to match the pre-processing of the IWS dataset
+            review_text = raw_review_text
+            review_text = review_text.strip()
+            # These transformations have only been applied to fold 0 of the IWS dataset
+            if fold == 0:
+                review_text = br_regex.sub(' ', review_text)
+                review_text = review_text.replace('-', ' ')
+                review_text = review_text.replace('/', ' ')
+                review_text = review_text.translate(punc_trans)
+                review_text = review_text.lower()
+
+            reviews.append({
+                # The review_id is the first part of the filename.
+                'review_id': int(review_file.name.split('_')[0]),
+                'review_text': review_text,
+            })
+        review_texts_df = pd.DataFrame(reviews)
+
+        # Get the IMDB title_id for each review.
+        with open(os.path.join(fold_dir, f'urls_{class_label}.txt')) as f:
+            urls = pd.Series(f.readlines())
+        title_ids = urls.str.extract(r'http://www.imdb.com/title/(tt[0-9]{7})/usercomments', expand=False)
+        assert not title_ids.isna().any()
+        review_titles_df = (pd.DataFrame(title_ids)
+                            .reset_index()
+                            .rename(columns={
+                                0: 'title_id',
+                                # The sequence of URLs maps to the review_id
+                                'index': 'review_id',
+                            }))
+
+        # Merge review_texts with title_ids, and check there were no failed matches
+        reviews_df = review_texts_df.merge(review_titles_df, on='review_id', validate='one_to_one')
+        assert reviews_df.shape[0] == review_texts_df.shape[0] == review_titles_df.shape[0]
+        # Select the subset of reviews for the given fold and class in the IWS dataset
+        subset_df = cast(pd.DataFrame, df[(df['fold'] == fold) & (df['class'] == target_class)])
+        assert reviews_df.shape[0] == subset_df.shape[0]
+
+        # Some reviews are identical, so merge by concatenating column
+        # sets of IWS dataset and reviews with title_ids
+        reviews_df = reviews_df.sort_values(by='review_text').reset_index(drop=True)
+        subset_df = subset_df.sort_values(by='text').reset_index(drop=True)
+        subset_df = pd.concat([subset_df, reviews_df], axis='columns')
+        # Verify all review texts are identical after the merge
+        assert cast(pd.Series, (subset_df['text'] == subset_df['review_text'])).all()
+
+        return subset_df[['index', 'title_id']]
+
+    movie_ids_df = pd.concat([
+        get_title_ids(dataset_df, fold=0, target_class='positive'),
+        get_title_ids(dataset_df, fold=0, target_class='negative'),
+        get_title_ids(dataset_df, fold=1, target_class='positive'),
+        get_title_ids(dataset_df, fold=1, target_class='negative'),
+    ]).sort_values(by='index').reset_index(drop=True)
+
+    # Merge movie_ids with IWS dataset
+    reviews_df = dataset_df.merge(movie_ids_df, on='index', validate='one_to_one')
+    assert reviews_df.shape[0] == dataset_df.shape[0] == movie_ids_df.shape[0]
+
+    # Update title_ids we know have changed in the latest IMDB metadata
+    # (see: https://developer.imdb.com/documentation/key-concepts/?ref_=up_next#duplicate-ids)
+    title_id_map_file = cache_path('imdb_id_map.csv')
+    title_id_map_df = pd.read_csv(title_id_map_file)
+    title_id_map: Mapping[str, str] = cast(
+        Mapping[str, str],
+        pd.Series(title_id_map_df['new_id'].values,
+                  index=title_id_map_df['old_id']).to_dict()
+    )
+    reviews_df['title_id'] = reviews_df['title_id'].replace(title_id_map)
+    # Remove title_ids we know there is no IMDB metadata available for
+    excluded_title_ids = [
+        # Michael Jackson: Thriller
+        'tt0088263',
+    ]
+    reviews_df = reviews_df[~reviews_df['title_id'].isin(excluded_title_ids)]
+
+    local_imdb_basics_file = cache_path('title.basics.tsv.gz')
+    if not os.path.isfile(local_imdb_basics_file):
+        raise ValueError(
+            'IMDb does not permit bots, so please download '
+            'https://datasets.imdbws.com/title.basics.tsv.gz '
+            f'and place at: {local_imdb_basics_file}'
+        )
+
+    imdb_basics_df = pd.read_csv(local_imdb_basics_file, compression='gzip',
+                                 sep='\t', na_values=[r'\N'], low_memory=False)
+    imdb_basics_df = imdb_basics_df.rename(columns={'tconst': 'title_id'})
+
+    missing_title_ids = set(reviews_df['title_id']) - set(imdb_basics_df['title_id'])
+    if len(missing_title_ids) > 0:
+        raise ValueError(
+            ('Unable to find IMDb metadata for the following title_ids, '
+             f'please add mappings to new title_id in {title_id_map_file} '
+             'by finding the new_id in the redirection of https://imdb.com/title/<old-id>, '
+             'or add the title_ids to the list of excluded_title_ids:\n')
+            + '\n'.join(missing_title_ids)
+        )
+
+    df = reviews_df.merge(imdb_basics_df, on='title_id', validate='many_to_one')
+    assert df.shape[0] == reviews_df.shape[0]
+
+    joblib.dump(df, EXTENDED_IMDB_CACHE_PATH)
+    return joblib.load(EXTENDED_IMDB_CACHE_PATH)
+
+
+def imdb_genre_dataset() -> Dataset:
+    df = extended_imdb_df()
+    genre_df = list_series_to_one_hot_df(df['genres'].str.split(','))
+
+    def genre_class_series(genre_df: pd.DataFrame, genres: Set[str]) -> pd.Series:
+        """Return a target class series where the class values are the given
+        genres, and rows with none or multiple of those genres is set to
+        nan."""
+        genre_series = pd.Series(np.nan, index=genre_df.index)
+        for genre in genres:
+            genre_mask = genre_df[genre]
+            for alt_genre in genres - {genre}:
+                genre_mask = genre_mask & ~genre_df[alt_genre]
+            genre_series[genre_mask] = genre
+        return genre_series
+
+    df['class'] = genre_class_series(genre_df, {'Drama', 'Comedy'})
+    df = df[~df['class'].isna()]
+
+    return Dataset(
+        df=df,
+        text_features={'text'},
+        test_mask=cast(pd.Series, (df['fold'] == 1)),
+        description='IMDB Reviews: Drama/Comedy',
     )
 
 
@@ -457,6 +633,7 @@ def named_datasets(datasets: Mapping[str, Callable[[], Dataset]]) -> Mapping[str
 
 DATASETS = named_datasets({
     'imdb': imdb_dataset,
+    'imdb_genre': imdb_genre_dataset,
     'bias_pa': bias_pa_dataset,
     'bias_pt': bias_pt_dataset,
     'bias_jp': bias_jp_dataset,
@@ -479,6 +656,7 @@ DATASETS = named_datasets({
 
 DATASET_LABELS = {
     'imdb': 'IMD',
+    'imdb_genre': 'IMG',
     'bias_pa': 'BPA',
     'bias_pt': 'BPT',
     'bias_jp': 'BJP',

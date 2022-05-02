@@ -167,7 +167,7 @@ def run_labels_generation(labels_config: LabelsConfig, *,
         covered_rule_df = rule_df[covered_train_mask]
         covered_train_prob_labels = labels_config.labeller.get_probabilistic_labels(
             classes=dataset.classes,
-            rngseed=labels_config.rules_config.rngseed * LABELLING_RANDOM_SEED,
+            rngseed=LABELLING_RANDOM_SEED,
             rule_df=covered_rule_df,
         )
     return {

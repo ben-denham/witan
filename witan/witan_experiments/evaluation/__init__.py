@@ -1,5 +1,6 @@
 # coding: utf-8
 
+from collections import defaultdict
 from math import ceil
 import numpy as np
 import pandas as pd
@@ -90,6 +91,16 @@ STYLE_CONFS: List[Dict[str, Any]] = [
         'labels': ['Snuba'],
         'color': '#f87fbd',
         'symbol': 'cross',
+    },
+    {
+        'labels': ['HDC'],
+        'color': '#70453c',
+        'symbol': 'bowtie',
+    },
+    {
+        'labels': ['CBI'],
+        'color': '#eb907e',
+        'symbol': 'hourglass',
     },
     {
         'labels': ['Semi-supervised'],
@@ -275,7 +286,7 @@ def metric_line_grid(df: pd.DataFrame,
     """Plot a grid of metric line charts for the given results summary
     df. Accepts columns to use as the metric, facet_row, and
     facet_col. Accepts ruleset_generators to provide user-friendly
-    names."""
+    names. Displays the mean value when multiple rngseeds are present."""
     # Compute plot sizes.
     cell_height = 350
     if facet_row is None:
@@ -288,6 +299,14 @@ def metric_line_grid(df: pd.DataFrame,
 
     df = df.copy()
     df = df.fillna(0)
+
+    # Compute mean values over rngseeds
+    point_groups = df.groupby(['dataset_name', 'rule_seeder', 'ruleset_generator',
+                               'interaction_count', 'labeller', 'classifier'])
+    for _, point_group_df in point_groups:
+        assert point_group_df.shape[0] == point_group_df['rngseed'].nunique()
+    df = point_groups.mean().reset_index().drop(columns=['rngseed'])
+
     # Duplicate TrueRG results on all plots.
     truerg_rows = df[(df['rule_seeder'] == BlankRS()) & (df['ruleset_generator'] == TrueRG())]
     for rule_seeder in df['rule_seeder'].unique():
@@ -404,7 +423,8 @@ def metric_line_grid(df: pd.DataFrame,
 def build_metric_df(df: pd.DataFrame, *,
                     method: str,
                     metric: str,
-                    labelled_methods: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+                    labelled_methods: Optional[Dict[str, Any]] = None,
+                    rngseed_agg: str = 'mean') -> pd.DataFrame:
     """Return a DataFrame presenting the given metric column on each
     dataset for each given method column and interaction count
     combination. Can provide a dict of labelled method values to
@@ -419,8 +439,19 @@ def build_metric_df(df: pd.DataFrame, *,
         }
         for dataset_name in dataset_names:
             cell_df = group_df[group_df['dataset_name'] == dataset_name]
-            assert cell_df.shape[0] == 1
-            cell_metric = cell_df.iloc[0][metric]
+            # We should only have one row per rngseed
+            if cell_df.shape[0] != cell_df['rngseed'].nunique():
+                display(cell_df)
+            assert cell_df.shape[0] == cell_df['rngseed'].nunique()
+            # Aggregate values for different rngseeds
+            if rngseed_agg == 'mean':
+                cell_metric = cell_df[metric].mean()
+            elif rngseed_agg == 'std':
+                cell_metric = cell_df[metric].std()
+            elif rngseed_agg == 'count':
+                cell_metric = cell_df[metric].count()
+            else:
+                raise ValueError(f'Unrecognised rngseed_agg: {rngseed_agg}')
             group_row[dataset_name] = cell_metric
         group_rows.append(group_row)
     metric_df = pd.DataFrame(group_rows)
@@ -438,6 +469,29 @@ def build_metric_df(df: pd.DataFrame, *,
         metric_df = metric_df.sort_values(['method', 'interaction_count'], key=sort_key)
 
     return metric_df.set_index(['method', 'interaction_count']).fillna(0)
+
+
+def median_stds_df(metric_std_df: pd.DataFrame, *,
+                   datasets: List[str],
+                   ics: List[str]) -> pd.DataFrame:
+    """Return a dataframe of median standard deviation for each method in
+    a given metric_df of standard deviations."""
+    methods = metric_std_df.index.get_level_values('method').unique()
+    method_stds = defaultdict(list)
+    for dataset in datasets:
+        for ic in ics:
+            for method in methods:
+                method_stds[method].append(metric_std_df.loc[(method, ic), dataset])
+    return pd.DataFrame({
+        'median_std': pd.Series({
+            method: np.median(stds)
+            for method, stds in method_stds.items()
+        }),
+        'experiment_count': pd.Series({
+            method: len(stds)
+            for method, stds in method_stds.items()
+        }),
+    })
 
 
 def display_metric_table(metric_df: pd.DataFrame,

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .utils import KeyHashable
 from .utils.rules import Rule, make_single_feature_rule
@@ -100,6 +100,59 @@ class AccRS(RuleSeeder):
         for target_class in classes:
             if len(potential_class_rules[target_class]) < self.rules_per_class:
                 raise ValueError(f'Not enough potential seed rules for class: {target_class}')
+            seed_rules += rng.choice(potential_class_rules[target_class],
+                                     self.rules_per_class,
+                                     replace=False).tolist()
+        return seed_rules
+
+
+class ClassSubsetAccRS(AccRS):
+    """Generates seed rules for random features within a range of
+    acceptable accuracies:
+
+    min_cov_ratio: The minimum coverage for each seed rule.
+    min_accuracy_gap: The minimum accuracy gap above a random classifier of seed rules.
+    max_accuracy_gap: The maximum accuracy gap above a random classifier of seed rules.
+    rpc: The number of seed rules to generate for each class.
+    c: Number of random classes to generate seed rules for (all classes if None).
+    """
+    def __init__(self,
+                 min_cov_ratio: float = 0.02,
+                 min_acc_gap: float = 0.2,
+                 max_acc_gap: float = 0.35,
+                 rpc: int = 2,
+                 c: Optional[int] = None):
+        super().__init__(
+            min_cov_ratio=min_cov_ratio,
+            min_acc_gap=min_acc_gap,
+            max_acc_gap=max_acc_gap,
+            rpc=rpc,
+        )
+        self.class_count = self.c = c
+
+    def get_seed_rules(self,
+                       classes: np.array,
+                       train_binary_features: pd.DataFrame,
+                       train_y: pd.Series,
+                       rngseed: int) -> List[Rule]:
+        potential_class_rules = self.get_potential_class_rules(
+            classes=classes,
+            train_binary_features=train_binary_features,
+            train_y=train_y,
+        )
+        potential_classes = [
+            target_class for target_class in classes
+            if len(potential_class_rules[target_class]) >= self.rules_per_class
+        ]
+        seed_class_count = self.c if self.c is not None else len(classes)
+        if len(potential_classes) < seed_class_count:
+            raise ValueError(f'Not enough potential rules for {seed_class_count} classes.')
+
+        rng = np.random.RandomState(rngseed)
+        seed_classes = (rng.choice(potential_classes, self.c, replace=False)
+                        if self.c is not None else classes)
+        seed_rules = []
+        for target_class in seed_classes:
             seed_rules += rng.choice(potential_class_rules[target_class],
                                      self.rules_per_class,
                                      replace=False).tolist()

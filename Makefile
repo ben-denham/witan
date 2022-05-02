@@ -42,3 +42,5 @@ test:
 		--cov-report=term
 types:
 	docker-compose run --rm --workdir="/home/jovyan/work/witan" jupyter mypy .
+pylsp:
+	docker-compose run --rm --workdir="/home/jovyan/work/witan" jupyter pylsp

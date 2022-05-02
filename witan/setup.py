@@ -25,10 +25,13 @@ setup(
         'dev': [
             'flake8==3.7.9',
             'mypy==0.812',
-            'pytest==5.2.2',
+            'pytest==7.1.1',
             'pytest-cov==2.8.1',
             # Typing stubs.
             'pandas-stubs==1.1.0.7',
+            # pylsp Server
+            'python-lsp-server[flake8]==1.4.1',
+            'pylsp-mypy==0.5.7',
         ]
     }
 )
