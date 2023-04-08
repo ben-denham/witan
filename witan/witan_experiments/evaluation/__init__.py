@@ -112,6 +112,11 @@ STYLE_CONFS: List[Dict[str, Any]] = [
         'color': 'red',
         'symbol': 'circle',
     },
+    {
+        'labels': ['Random labelling'],
+        'color': '#8400d6',
+        'symbol': 'star',
+    },
 ]
 SERIES_STYLES: pd.DataFrame = pd.DataFrame.from_dict({
     label: conf
